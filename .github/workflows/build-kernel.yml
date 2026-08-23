@@ -156,7 +156,7 @@ jobs:
       - name: Fetch kernel source
         run: bash scripts/source.sh
 
-      # 新增：自动修复缺失的 Kconfig 文件
+      # 自动修复缺失的 Kconfig 文件
       - name: Fix missing vendor Kconfig files
         run: |
           cd kernel_workspace/android-kernel
@@ -170,7 +170,6 @@ jobs:
               echo "目录已存在: $dir"
             fi
           done
-          # 尝试运行配置并抓取报错路径，自动创建文件，防止出现下一个缺失
           make O=out ARCH=arm64 vendor/sky_consolidate_defconfig 2>&1 | grep "can't open file" | awk '{print $4}' | while read path; do
             dir=$(dirname "$path")
             if [ ! -d "$dir" ]; then
@@ -195,8 +194,11 @@ jobs:
           key: kernel-${{ env.DEVICE }}-${{ env.KSU_VARIANT }}-${{ env.KERNEL_VERSION }}
           max-size: 2G
 
+      # 重点修改：强制开启 devfreq 配置修复报错
       - name: Build kernel
-        run: bash scripts/build.sh all
+        run: |
+          export CFLAGS="-DCONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=1 $CFLAGS"
+          bash scripts/build.sh all
 
       - name: Package artifacts
         run: bash scripts/package.sh all
