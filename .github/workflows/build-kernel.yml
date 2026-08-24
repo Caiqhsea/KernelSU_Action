@@ -54,30 +54,4 @@ jobs:
         with:
           name: Kernel-Sky-Image
           path: ${{ github.workspace }}/out/arch/arm64/boot/Image.gz
-          if-no-files-found: error      - name: Build Kernel
-        run: |
-          cd kernel_source
-          make O=$GITHUB_WORKSPACE/out -j$(nproc)
-
-      - name: Upload Kernel Image
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kernel-Sky-Image
-          path: ${{ github.workspace }}/out/arch/arm64/boot/Image
-          if-no-files-found: error
-      - name: Generate Defconfig
-        run: |
-          cd /tmp/sm4450/common
-          make O=$GITHUB_WORKSPACE/out gki_defconfig
-
-      - name: Build Kernel
-        run: |
-          cd /tmp/sm4450/common
-          make O=$GITHUB_WORKSPACE/out -j$(nproc)
-
-      - name: Upload Kernel Image
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kernel-Sky-Image
-          path: ${{ github.workspace }}/out/arch/arm64/boot/Image
           if-no-files-found: error
