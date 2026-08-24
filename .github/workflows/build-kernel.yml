@@ -31,26 +31,28 @@ jobs:
       - name: Fetch kernel source
         run: bash scripts/source.sh
 
-      # ================= 核心修复步骤（云端自动补全 mihw） =================
+      # 修复 mihw 并清理不兼容的 WALT 调度器代码
       - name: Fix mihw and config for Sky
         run: |
           cd kernel_workspace/android-kernel
-          echo ">>> 正在从 shennong 仓库拉取缺失的 mihw 驱动..."
+          echo ">>> 拉取 mihw 驱动源码..."
           git clone --depth=1 https://github.com/loogeo/Android_Xiaomi_Kernel_for_shennong.git /tmp/shennong
           
-          echo ">>> 正在复制 mihw 目录..."
+          echo ">>> 复制 mihw 驱动..."
           cp -r /tmp/shennong/drivers/mihw drivers/
 
-          echo ">>> 正在修改顶层 Kconfig 和 Makefile..."
+          echo ">>> 删除不兼容的 WALT 代码 (6.1内核代码) ..."
+          # 关键修复：移除会导致 5.10 报错的子目录
+          rm -rf drivers/mihw/mi_sched
+          rm -rf drivers/mihw/turbo_sched
+
+          echo ">>> 添加 Kconfig 和 Makefile 引用..."
           echo 'obj-$(CONFIG_MIHW)         += mihw/' >> drivers/Makefile
           echo 'source "drivers/mihw/Kconfig"' >> drivers/Kconfig
-
-          echo ">>> 正在修改 defconfig 开启必要配置..."
+          
+          echo ">>> 开启配置..."
           echo "CONFIG_MIHW=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
-          echo "CONFIG_SCHED_WALT=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
-          echo "CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
           cd ../..
-      # ===================================================================
 
       - name: Build kernel
         run: |
