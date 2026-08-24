@@ -8,9 +8,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - name: Checkout KernelSU_Action
-        uses: actions/checkout@v4
-
       - name: Install Dependencies
         run: |
           sudo apt-get update -qq
@@ -21,12 +18,9 @@ jobs:
 
       - name: Checkout Kernel Source
         run: |
-          git clone --depth=1 https://github.com/sm4450-development/kernel_manifest /tmp/sm4450
-          cd /tmp/sm4450
-          # 直接拉取 community 内核源码（不依赖 repo，避免网络卡死）
-          git clone --depth=1 https://github.com/sm4450-development/android_kernel_common.git common
+          git clone --depth=1 https://github.com/sm4450-development/android_kernel_common.git kernel_source
 
-      - name: Set Environment Variables (GCC Mode)
+      - name: Set Environment Variables
         run: |
           echo "ARCH=arm64" >> $GITHUB_ENV
           echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
@@ -35,6 +29,22 @@ jobs:
           echo "LLVM=0" >> $GITHUB_ENV
           echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
 
+      - name: Generate Defconfig
+        run: |
+          cd kernel_source
+          make O=$GITHUB_WORKSPACE/out gki_defconfig
+
+      - name: Build Kernel
+        run: |
+          cd kernel_source
+          make O=$GITHUB_WORKSPACE/out -j$(nproc)
+
+      - name: Upload Kernel Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-Sky-Image
+          path: ${{ github.workspace }}/out/arch/arm64/boot/Image
+          if-no-files-found: error
       - name: Generate Defconfig
         run: |
           cd /tmp/sm4450/common
