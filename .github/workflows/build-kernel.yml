@@ -1,4 +1,4 @@
-name: Build Kernel
+name: Build Kernel with GCC
 
 on:
   workflow_dispatch:
@@ -7,71 +7,47 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    env:
-      WORKSPACE: ${{ github.workspace }}/kernel_workspace
-      CONFIG_ENV: config.env
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout KernelSU_Action
+        uses: actions/checkout@v4
 
-      - name: Resolve configuration
-        run: bash scripts/config.sh
-
-      - name: Install build dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             bc bison build-essential ccache cpio curl device-tree-compiler flex \
             git libelf-dev libssl-dev lz4 make python3 rsync unzip zip zstd \
-            libncurses-dev
-          mkdir -p "$WORKSPACE"
+            libncurses-dev gcc-aarch64-linux-gnu
 
-      - name: Set up toolchain
-        run: bash scripts/toolchain.sh
-
-      - name: Fetch kernel source
-        run: bash scripts/source.sh
-
-      # 修复：删除不兼容代码，并确保彻底清除Makefile引用
-      - name: Fix mihw and config for Sky
+      - name: Checkout Kernel Source
         run: |
-          cd kernel_workspace/android-kernel
-          git clone --depth=1 https://github.com/loogeo/Android_Xiaomi_Kernel_for_shennong.git /tmp/shennong
-          cp -r /tmp/shennong/drivers/mihw drivers/
+          git clone --depth=1 https://github.com/sm4450-development/kernel_manifest /tmp/sm4450
+          cd /tmp/sm4450
+          # 直接拉取 community 内核源码（不依赖 repo，避免网络卡死）
+          git clone --depth=1 https://github.com/sm4450-development/android_kernel_common.git common
 
-          # 核心修复：删除文件夹的同时，在同一行清理Makefile中的引用，防止找不到文件
-          rm -rf drivers/mihw/mi_sched; sed -i '/mi_sched/d' drivers/mihw/Makefile
-          rm -rf drivers/mihw/turbo_sched; sed -i '/turbo_sched/d' drivers/mihw/Makefile
-
-          sed -i '/#include <linux\/device.h>/a #include <linux\/devfreq.h>' drivers/scsi/mi_ufs/mi-ufshcd.h
-
-          rm -f drivers/misc/mi-memory/mi_ufs_info.c
-          sed -i '/mi_ufs_info/d' drivers/misc/mi-memory/Makefile
-
-          rm -rf drivers/misc/ktd3136_bl; sed -i '/ktd3136_bl/d' drivers/misc/Kconfig; sed -i '/ktd3136_bl/d' drivers/misc/Makefile
-
-          echo 'obj-$(CONFIG_MIHW)         += mihw/' >> drivers/Makefile
-          echo 'source "drivers/mihw/Kconfig"' >> drivers/Kconfig
-
-          echo "CONFIG_MIHW=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
-          echo "CONFIG_PM_DEVFREQ=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
-          echo "CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
-          cd ../..
-
-      - name: Build kernel
+      - name: Set Environment Variables (GCC Mode)
         run: |
-          sed -i 's/-j$(nproc)/-j4/g' scripts/build.sh
-          bash scripts/build.sh all
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "LD=aarch64-linux-gnu-ld" >> $GITHUB_ENV
+          echo "AR=aarch64-linux-gnu-ar" >> $GITHUB_ENV
+          echo "LLVM=0" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
 
-      - name: Upload kernel image
+      - name: Generate Defconfig
+        run: |
+          cd /tmp/sm4450/common
+          make O=$GITHUB_WORKSPACE/out gki_defconfig
+
+      - name: Build Kernel
+        run: |
+          cd /tmp/sm4450/common
+          make O=$GITHUB_WORKSPACE/out -j$(nproc)
+
+      - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-Sky-Image
-          path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
-          if-no-files-found: error
-
-      - name: Upload AnyKernel3
-        uses: actions/upload-artifact@v4
-        with:
-          name: AnyKernel3-Sky
-          path: kernel_workspace/AnyKernel3/*
+          path: ${{ github.workspace }}/out/arch/arm64/boot/Image
           if-no-files-found: error
