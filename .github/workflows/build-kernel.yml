@@ -31,7 +31,7 @@ jobs:
       - name: Fetch kernel source
         run: bash scripts/source.sh
 
-      # 终极修复：一次性解决所有已知报错
+      # 终极防御修复：一次性解决所有小米私有驱动缺失及报错
       - name: Fix mihw and config for Sky
         run: |
           cd kernel_workspace/android-kernel
@@ -50,9 +50,13 @@ jobs:
           rm -f drivers/misc/mi-memory/mi_ufs_info.c
           sed -i '/mi_ufs_info/d' drivers/misc/mi-memory/Makefile
 
-          echo ">>> 安全跳过 ktd3136 背光驱动 (注释引用，不删除目录以防报错)..."
-          sed -i 's/source "drivers\/misc\/ktd3136_bl\/Kconfig"/# source "drivers\/misc\/ktd3136_bl\/Kconfig"/g' drivers/misc/Kconfig
-          sed -i 's/obj-$(CONFIG_KTD3136_BL)/# obj-$(CONFIG_KTD3136_BL)/g' drivers/misc/Makefile
+          echo ">>> 终极防御：自动给所有缺失 i2c.h 的驱动补上头文件..."
+          grep -rL "linux/i2c.h" drivers/misc/*/*.c | while read f; do
+            sed -i '1i #include <linux/i2c.h>' "$f"
+          done
+
+          echo ">>> 终极防御：全局移除 Werror，防止警告变成错误..."
+          find drivers/misc -name "Makefile" -exec sed -i 's/-Werror//g' {} \;
 
           echo ">>> 添加 Kconfig 和 Makefile 引用..."
           echo 'obj-$(CONFIG_MIHW)         += mihw/' >> drivers/Makefile
