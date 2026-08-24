@@ -18,7 +18,7 @@ jobs:
 
       - name: Checkout Kernel Source
         run: |
-          git clone --depth=1 https://github.com/sm4450-development/android_kernel_common.git kernel_source
+          git clone --depth=1 -b sky-t-oss https://github.com/Caiqhsea/Xiaomi_Kernel_OpenSource.git kernel_source
 
       - name: Set Environment Variables
         run: |
@@ -29,12 +29,32 @@ jobs:
           echo "LLVM=0" >> $GITHUB_ENV
           echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
 
+      - name: Fix Broken Source
+        run: |
+          cd kernel_source
+          rm -rf drivers/mihw/mi_sched drivers/mihw/turbo_sched
+          sed -i '/mi_sched/d' drivers/mihw/Makefile
+          sed -i '/turbo_sched/d' drivers/mihw/Makefile
+          echo "CONFIG_MIHW=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
+          echo "CONFIG_PM_DEVFREQ=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
+          echo "CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
+
       - name: Generate Defconfig
         run: |
           cd kernel_source
-          make O=$GITHUB_WORKSPACE/out gki_defconfig
+          make O=$GITHUB_WORKSPACE/out vendor/sky_consolidate_defconfig
 
       - name: Build Kernel
+        run: |
+          cd kernel_source
+          make O=$GITHUB_WORKSPACE/out -j$(nproc)
+
+      - name: Upload Kernel Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-Sky-Image
+          path: ${{ github.workspace }}/out/arch/arm64/boot/Image.gz
+          if-no-files-found: error      - name: Build Kernel
         run: |
           cd kernel_source
           make O=$GITHUB_WORKSPACE/out -j$(nproc)
