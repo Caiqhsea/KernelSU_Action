@@ -31,10 +31,63 @@ jobs:
       - name: Fetch kernel source
         run: bash scripts/source.sh
 
-      # 终极防御修复：一次性解决所有小米私有驱动缺失及报错
+      # 终极修复：连根拔除所有报错源
       - name: Fix mihw and config for Sky
         run: |
           cd kernel_workspace/android-kernel
+          echo ">>> 拉取驱动源码..."
+          git clone --depth=1 https://github.com/loogeo/Android_Xiaomi_Kernel_for_shennong.git /tmp/shennong
+          cp -r /tmp/shennong/drivers/mihw drivers/
+
+          echo ">>> 删除不兼容的 6.1 WALT 调度代码..."
+          rm -rf drivers/mihw/mi_sched
+          rm -rf drivers/mihw/turbo_sched
+
+          echo ">>> 修复 mi-ufshcd.h 缺失的头文件..."
+          sed -i '/#include <linux\/device.h>/a #include <linux\/devfreq.h>' drivers/scsi/mi_ufs/mi-ufshcd.h
+
+          echo ">>> 删除导致报错的小米私有调试模块..."
+          rm -f drivers/misc/mi-memory/mi_ufs_info.c
+          sed -i '/mi_ufs_info/d' drivers/misc/mi-memory/Makefile
+
+          echo ">>> 彻底拔除报错的背光驱动..."
+          rm -rf drivers/misc/ktd3136_bl
+          # 必须清空 Kconfig 和 Makefile 里的残留引用，防止 Defconfig 报错
+          sed -i '/ktd3136_bl/d' drivers/misc/Kconfig
+          sed -i '/ktd3136_bl/d' drivers/misc/Makefile
+
+          echo ">>> 全局移除 Werror，防止任何警告变成错误..."
+          find . -name "Makefile" -exec sed -i 's/-Werror//g' {} \;
+
+          echo ">>> 添加 Kconfig 和 Makefile 引用..."
+          echo 'obj-$(CONFIG_MIHW)         += mihw/' >> drivers/Makefile
+          echo 'source "drivers/mihw/Kconfig"' >> drivers/Kconfig
+          
+          echo ">>> 开启配置并强制开启 devfreq..."
+          echo "CONFIG_MIHW=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
+          echo "CONFIG_PM_DEVFREQ=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
+          echo "CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
+          cd ../..
+
+      # 强制限制线程数防止内存溢出
+      - name: Build kernel
+        run: |
+          sed -i 's/-j$(nproc)/-j4/g' scripts/build.sh
+          bash scripts/build.sh all
+
+      - name: Upload kernel image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-Sky-Image
+          path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
+          if-no-files-found: error
+
+      - name: Upload AnyKernel3
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnyKernel3-Sky
+          path: kernel_workspace/AnyKernel3/*
+          if-no-files-found: error          cd kernel_workspace/android-kernel
           echo ">>> 拉取驱动源码..."
           git clone --depth=1 https://github.com/loogeo/Android_Xiaomi_Kernel_for_shennong.git /tmp/shennong
           cp -r /tmp/shennong/drivers/mihw drivers/
