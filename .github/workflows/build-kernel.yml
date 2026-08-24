@@ -31,10 +31,47 @@ jobs:
       - name: Fetch kernel source
         run: bash scripts/source.sh
 
-      # 精准修复：解决所有驱动缺失与编译报错
       - name: Fix mihw and config for Sky
         run: |
           cd kernel_workspace/android-kernel
+          git clone --depth=1 https://github.com/loogeo/Android_Xiaomi_Kernel_for_shennong.git /tmp/shennong
+          cp -r /tmp/shennong/drivers/mihw drivers/
+          
+          rm -rf drivers/mihw/mi_sched
+          rm -rf drivers/mihw/turbo_sched
+
+          sed -i '/#include <linux\/device.h>/a #include <linux\/devfreq.h>' drivers/scsi/mi_ufs/mi-ufshcd.h
+
+          # 删除导致不断报错的私有文件
+          rm -f drivers/misc/mi-memory/mi_ufs_info.c
+          sed -i '/mi_ufs_info/d' drivers/misc/mi-memory/Makefile
+
+          echo 'obj-$(CONFIG_MIHW)         += mihw/' >> drivers/Makefile
+          echo 'source "drivers/mihw/Kconfig"' >> drivers/Kconfig
+          
+          echo "CONFIG_MIHW=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
+          echo "CONFIG_PM_DEVFREQ=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
+          echo "CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
+          cd ../..
+
+      - name: Build kernel
+        run: |
+          sed -i 's/-j$(nproc)/-j4/g' scripts/build.sh
+          bash scripts/build.sh all
+
+      - name: Upload kernel image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-Sky-Image
+          path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
+          if-no-files-found: error
+
+      - name: Upload AnyKernel3
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnyKernel3-Sky
+          path: kernel_workspace/AnyKernel3/*
+          if-no-files-found: error          cd kernel_workspace/android-kernel
           echo ">>> 拉取驱动源码..."
           git clone --depth=1 https://github.com/loogeo/Android_Xiaomi_Kernel_for_shennong.git /tmp/shennong
           
