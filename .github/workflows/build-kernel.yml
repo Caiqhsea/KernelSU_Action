@@ -1,0 +1,80 @@
+name: Build Kernel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      WORKSPACE: ${{ github.workspace }}/kernel_workspace
+      CONFIG_ENV: config.env
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve configuration
+        run: bash scripts/config.sh
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache cpio curl device-tree-compiler flex \
+            git libelf-dev libssl-dev lz4 make python3 rsync unzip zip zstd \
+            libncurses-dev
+          mkdir -p "$WORKSPACE"
+
+      - name: Set up toolchain
+        run: bash scripts/toolchain.sh
+
+      - name: Fetch kernel source
+        run: bash scripts/source.sh
+
+      # 自动修复驱动缺失及头部文件引用问题
+      - name: Fix mihw and config for Sky
+        run: |
+          cd kernel_workspace/android-kernel
+          echo ">>> 拉取驱动源码..."
+          git clone --depth=1 https://github.com/loogeo/Android_Xiaomi_Kernel_for_shennong.git /tmp/shennong
+          
+          echo ">>> 复制 mihw 驱动..."
+          cp -r /tmp/shennong/drivers/mihw drivers/
+
+          echo ">>> 删除不兼容的 6.1 WALT 调度代码..."
+          rm -rf drivers/mihw/mi_sched
+          rm -rf drivers/mihw/turbo_sched
+
+          echo ">>> 修复 mi-ufshcd.h 缺失的头文件..."
+          sed -i '/#include <linux\/device.h>/a #include <linux\/devfreq.h>' drivers/scsi/mi_ufs/mi-ufshcd.h
+
+          echo ">>> 添加 Kconfig 和 Makefile 引用..."
+          echo 'obj-$(CONFIG_MIHW)         += mihw/' >> drivers/Makefile
+          echo 'source "drivers/mihw/Kconfig"' >> drivers/Kconfig
+          
+          echo ">>> 开启配置并强制开启 devfreq..."
+          echo "CONFIG_MIHW=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
+          echo "CONFIG_PM_DEVFREQ=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
+          echo "CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
+          cd ../..
+
+      - name: Build kernel
+        run: |
+          echo ">>> 强制限制编译线程数为4，防止内存溢出..."
+          # 把脚本里默认的 -j$(nproc) 强制替换成 -j4
+          sed -i 's/-j$(nproc)/-j4/g' scripts/build.sh
+          bash scripts/build.sh all
+
+      - name: Upload kernel image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-Sky-Image
+          path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
+          if-no-files-found: error
+
+      - name: Upload AnyKernel3
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnyKernel3-Sky
+          path: kernel_workspace/AnyKernel3/*
+          if-no-files-found: error
