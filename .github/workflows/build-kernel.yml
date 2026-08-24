@@ -31,7 +31,7 @@ jobs:
       - name: Fetch kernel source
         run: bash scripts/source.sh
 
-      # 终极稳定修复：直接删除所有导致反复报错的私有驱动文件
+      # 终极修复：一次性解决所有已知报错
       - name: Fix mihw and config for Sky
         run: |
           cd kernel_workspace/android-kernel
@@ -46,13 +46,13 @@ jobs:
           echo ">>> 修复 mi-ufshcd.h 缺失的头文件..."
           sed -i '/#include <linux\/device.h>/a #include <linux\/devfreq.h>' drivers/scsi/mi_ufs/mi-ufshcd.h
 
-          echo ">>> 直接删除导致反复报错的私有调试模块..."
+          echo ">>> 删除导致报错的小米私有调试模块..."
           rm -f drivers/misc/mi-memory/mi_ufs_info.c
           sed -i '/mi_ufs_info/d' drivers/misc/mi-memory/Makefile
 
-          echo ">>> 直接删除一直报错的背光驱动以跳过编译..."
-          rm -rf drivers/misc/ktd3136_bl
-          sed -i '/ktd3136_bl/d' drivers/misc/Makefile
+          echo ">>> 安全跳过 ktd3136 背光驱动 (注释引用，不删除目录以防报错)..."
+          sed -i 's/source "drivers\/misc\/ktd3136_bl\/Kconfig"/# source "drivers\/misc\/ktd3136_bl\/Kconfig"/g' drivers/misc/Kconfig
+          sed -i 's/obj-$(CONFIG_KTD3136_BL)/# obj-$(CONFIG_KTD3136_BL)/g' drivers/misc/Makefile
 
           echo ">>> 添加 Kconfig 和 Makefile 引用..."
           echo 'obj-$(CONFIG_MIHW)         += mihw/' >> drivers/Makefile
