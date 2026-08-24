@@ -31,7 +31,7 @@ jobs:
       - name: Fetch kernel source
         run: bash scripts/source.sh
 
-      # 自动修复驱动缺失及头部文件引用问题
+      # 自动修复驱动缺失及兼容性问题
       - name: Fix mihw and config for Sky
         run: |
           cd kernel_workspace/android-kernel
@@ -48,6 +48,9 @@ jobs:
           echo ">>> 修复 mi-ufshcd.h 缺失的头文件..."
           sed -i '/#include <linux\/device.h>/a #include <linux\/devfreq.h>' drivers/scsi/mi_ufs/mi-ufshcd.h
 
+          echo ">>> 修复 ufs-qcom.h 的 return 类型错误..."
+          sed -i 's/return 0;/return;/g' drivers/scsi/ufs/ufs-qcom.h
+
           echo ">>> 添加 Kconfig 和 Makefile 引用..."
           echo 'obj-$(CONFIG_MIHW)         += mihw/' >> drivers/Makefile
           echo 'source "drivers/mihw/Kconfig"' >> drivers/Kconfig
@@ -58,10 +61,9 @@ jobs:
           echo "CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
           cd ../..
 
+      # 强制限制线程数防止内存溢出
       - name: Build kernel
         run: |
-          echo ">>> 强制限制编译线程数为4，防止内存溢出..."
-          # 把脚本里默认的 -j$(nproc) 强制替换成 -j4
           sed -i 's/-j$(nproc)/-j4/g' scripts/build.sh
           bash scripts/build.sh all
 
