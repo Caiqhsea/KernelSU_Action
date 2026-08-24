@@ -31,28 +31,23 @@ jobs:
       - name: Fetch kernel source
         run: bash scripts/source.sh
 
-      # 修复：拉取驱动，删除所有报错的文件夹
+      # 修复：删除不兼容代码，并确保彻底清除Makefile引用
       - name: Fix mihw and config for Sky
         run: |
           cd kernel_workspace/android-kernel
           git clone --depth=1 https://github.com/loogeo/Android_Xiaomi_Kernel_for_shennong.git /tmp/shennong
           cp -r /tmp/shennong/drivers/mihw drivers/
 
-          rm -rf drivers/mihw/mi_sched
-          rm -rf drivers/mihw/turbo_sched
+          # 核心修复：删除文件夹的同时，在同一行清理Makefile中的引用，防止找不到文件
+          rm -rf drivers/mihw/mi_sched; sed -i '/mi_sched/d' drivers/mihw/Makefile
+          rm -rf drivers/mihw/turbo_sched; sed -i '/turbo_sched/d' drivers/mihw/Makefile
 
           sed -i '/#include <linux\/device.h>/a #include <linux\/devfreq.h>' drivers/scsi/mi_ufs/mi-ufshcd.h
 
           rm -f drivers/misc/mi-memory/mi_ufs_info.c
           sed -i '/mi_ufs_info/d' drivers/misc/mi-memory/Makefile
 
-          rm -rf drivers/misc/ktd3136_bl
-          sed -i '/ktd3136_bl/d' drivers/misc/Kconfig
-          sed -i '/ktd3136_bl/d' drivers/misc/Makefile
-
-          rm -rf drivers/misc/ocp2131_bias
-          sed -i '/ocp2131_bias/d' drivers/misc/Kconfig
-          sed -i '/ocp2131_bias/d' drivers/misc/Makefile
+          rm -rf drivers/misc/ktd3136_bl; sed -i '/ktd3136_bl/d' drivers/misc/Kconfig; sed -i '/ktd3136_bl/d' drivers/misc/Makefile
 
           echo 'obj-$(CONFIG_MIHW)         += mihw/' >> drivers/Makefile
           echo 'source "drivers/mihw/Kconfig"' >> drivers/Kconfig
