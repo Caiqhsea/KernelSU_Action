@@ -31,7 +31,7 @@ jobs:
       - name: Fetch kernel source
         run: bash scripts/source.sh
 
-      # 终极修复：连根拔除所有报错源
+      # 精准修复：解决所有已知编译报错 (修复全局Werror误伤)
       - name: Fix mihw and config for Sky
         run: |
           cd kernel_workspace/android-kernel
@@ -52,12 +52,12 @@ jobs:
 
           echo ">>> 彻底拔除报错的背光驱动..."
           rm -rf drivers/misc/ktd3136_bl
-          # 必须清空 Kconfig 和 Makefile 里的残留引用，防止 Defconfig 报错
           sed -i '/ktd3136_bl/d' drivers/misc/Kconfig
           sed -i '/ktd3136_bl/d' drivers/misc/Makefile
 
-          echo ">>> 全局移除 Werror，防止任何警告变成错误..."
-          find . -name "Makefile" -exec sed -i 's/-Werror//g' {} \;
+          echo ">>> 精准修复被误伤的 Makefile Werror 参数..."
+          # 只修复带有 = 号的残余错误参数，而不是全盘删除 Werror
+          find . -name "Makefile" -exec sed -i 's/-Wno-=/-Wno-/g' {} \;
 
           echo ">>> 添加 Kconfig 和 Makefile 引用..."
           echo 'obj-$(CONFIG_MIHW)         += mihw/' >> drivers/Makefile
