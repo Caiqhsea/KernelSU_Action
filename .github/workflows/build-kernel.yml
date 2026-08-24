@@ -31,7 +31,7 @@ jobs:
       - name: Fetch kernel source
         run: bash scripts/source.sh
 
-      # 驱动修复步骤：整合 mihw 并修复已知编译错误
+      # 自动修复驱动缺失及兼容性问题
       - name: Fix mihw and config for Sky
         run: |
           cd kernel_workspace/android-kernel
@@ -41,15 +41,20 @@ jobs:
           echo ">>> 复制 mihw 驱动..."
           cp -r /tmp/shennong/drivers/mihw drivers/
 
-          echo ">>> 删除不兼容的 WALT 调度代码..."
+          echo ">>> 删除不兼容的 6.1 WALT 调度代码..."
           rm -rf drivers/mihw/mi_sched
           rm -rf drivers/mihw/turbo_sched
 
           echo ">>> 修复 mi-ufshcd.h 缺失的头文件..."
           sed -i '/#include <linux\/device.h>/a #include <linux\/devfreq.h>' drivers/scsi/mi_ufs/mi-ufshcd.h
 
-          echo ">>> 修复 ufs-qcom.h 的 return 类型错误..."
-          sed -i 's/return 0;/return;/g' drivers/scsi/ufs/ufs-qcom.h
+          echo ">>> 精准修复 ufs-qcom.h 的返回值冲突..."
+          # 先恢复所有 return 为 return 0
+          sed -i 's/return;/return 0;/g' drivers/scsi/ufs/ufs-qcom.h
+          # 再把三个 init/enable/resume 函数的类型改为 void
+          sed -i 's/int ufs_qcom_ice_init/void ufs_qcom_ice_init/g; s/int ufs_qcom_ice_enable/void ufs_qcom_ice_enable/g; s/int ufs_qcom_ice_resume/void ufs_qcom_ice_resume/g' drivers/scsi/ufs/ufs-qcom.h
+          # 最后只针对 disable 函数，把 return 0 换回 return
+          sed -i '/ufs_qcom_ice_disable/,/^}/s/return 0;/return;/g' drivers/scsi/ufs/ufs-qcom.h
 
           echo ">>> 添加 Kconfig 和 Makefile 引用..."
           echo 'obj-$(CONFIG_MIHW)         += mihw/' >> drivers/Makefile
