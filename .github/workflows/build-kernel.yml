@@ -1,4 +1,4 @@
-name: Build Kernel with GCC
+name: Build Sky Kernel with GCC
 
 on:
   workflow_dispatch:
@@ -8,6 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
+      # 1. 安装 GCC 工具链
       - name: Install Dependencies
         run: |
           sudo apt-get update -qq
@@ -16,10 +17,16 @@ jobs:
             git libelf-dev libssl-dev lz4 make python3 rsync unzip zip zstd \
             libncurses-dev gcc-aarch64-linux-gnu
 
+      # 2. 下载你刚找到的社区源码
       - name: Checkout Kernel Source
         run: |
-          git clone --depth=1 -b sky-t-oss https://github.com/Caiqhsea/Xiaomi_Kernel_OpenSource.git kernel_source
+          git clone --depth=1 https://github.com/Niyush-04/kernel_xiaomi_sm4450.git kernel_source
+          cd kernel_source
+          # 补全缺失的原厂设备树
+          git clone --depth=1 https://github.com/sm4450-development/device_xiaomi_sky-kernel.git /tmp/dtbs
+          cp /tmp/dtbs/dtbs/*.dtb arch/arm64/boot/dts/vendor/
 
+      # 3. 设置环境变量
       - name: Set Environment Variables
         run: |
           echo "ARCH=arm64" >> $GITHUB_ENV
@@ -29,29 +36,28 @@ jobs:
           echo "LLVM=0" >> $GITHUB_ENV
           echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
 
-      - name: Fix Broken Source
+      # 4. 修改 Makefile 加入设备树
+      - name: Update Makefile
         run: |
           cd kernel_source
-          rm -rf drivers/mihw/mi_sched drivers/mihw/turbo_sched
-          sed -i '/mi_sched/d' drivers/mihw/Makefile
-          sed -i '/turbo_sched/d' drivers/mihw/Makefile
-          echo "CONFIG_MIHW=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
-          echo "CONFIG_PM_DEVFREQ=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
-          echo "CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y" >> arch/arm64/configs/vendor/sky_consolidate_defconfig
+          echo 'dtb-$(CONFIG_ARCH_QCOM) += 05_dtbdump_Qualcomm_Technologies,_Inc._Parrot_4Gb_SoC.dtb' >> arch/arm64/boot/dts/vendor/Makefile
 
+      # 5. 生成配置
       - name: Generate Defconfig
         run: |
           cd kernel_source
-          make O=$GITHUB_WORKSPACE/out vendor/sky_consolidate_defconfig
+          make O=$GITHUB_WORKSPACE/out vendor/parrot_consolidate.config
 
+      # 6. 开始编译
       - name: Build Kernel
         run: |
           cd kernel_source
           make O=$GITHUB_WORKSPACE/out -j$(nproc)
 
+      # 7. 上传内核产物
       - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-Sky-Image
-          path: ${{ github.workspace }}/out/arch/arm64/boot/Image.gz
+          path: ${{ github.workspace }}/out/arch/arm64/boot/Image
           if-no-files-found: error
