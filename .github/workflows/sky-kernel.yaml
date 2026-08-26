@@ -32,6 +32,8 @@ jobs:
 
       - name: Install Dependencies
         run: |
+          # 启用阿里云镜像源（加速下载，可选）
+          sudo sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             bc bison build-essential ccache cpio curl device-tree-compiler flex \
@@ -41,6 +43,7 @@ jobs:
           clang --version
           llvm-ar --version
 
+      # ========== 使用 actions/checkout 拉取本地仓库 ==========
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
@@ -61,6 +64,7 @@ jobs:
           cd kernel_source
           make mrproper
           mkdir -p "$GITHUB_WORKSPACE/out"
+          # 优先使用自定义 config，若不存在则使用 defconfig
           if [ -f arch/arm64/configs/config ]; then
             cp arch/arm64/configs/config "$GITHUB_WORKSPACE/out/.config"
             make O="$GITHUB_WORKSPACE/out" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig
