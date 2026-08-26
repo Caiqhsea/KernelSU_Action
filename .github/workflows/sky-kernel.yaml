@@ -1,4 +1,4 @@
-name: Build Sky Kernel
+name: Build Kernel for Sky (GKI)
 
 on:
   workflow_dispatch:
@@ -7,99 +7,96 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 120
-
+    env:
+      WORKSPACE: ${{ github.workspace }}/kernel_workspace
     steps:
-      - name: Cleanup Disk Space
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf "/usr/local/share/boost"
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/hostedtoolcache
-          df -h
+      - uses: actions/checkout@v4
 
-      - name: Setup Swap
+      # ===== 1. 拉取你的内核源码 =====
+      - name: Clone kernel source
         run: |
-          sudo swapoff -a
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          echo "=== Swap 信息 ==="
-          free -h
-          swapon --show
+          git clone --depth=1 https://github.com/Caiqhsea/Xiaomi_Kernel_OpenSource -b sky-t-oss $WORKSPACE/kernel
 
-      - name: Install Dependencies
+      # ===== 2. 安装编译依赖 =====
+      - name: Install dependencies
         run: |
-          # 启用阿里云镜像源（加速下载，可选）
-          sudo sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt update -qq
+          sudo apt install -y --no-install-recommends \
             bc bison build-essential ccache cpio curl device-tree-compiler flex \
             git libelf-dev libssl-dev lz4 make python3 rsync unzip zip zstd \
-            libncurses-dev gcc-aarch64-linux-gnu lld clang llvm
-          echo "✅ 依赖安装完成"
-          clang --version
-          llvm-ar --version
+            libncurses-dev
 
-      # ========== 使用 actions/checkout 拉取本地仓库 ==========
-      - name: Checkout Kernel Source
-        uses: actions/checkout@v4
-        with:
-          path: kernel_source
-          ref: temp
-
-      - name: Set Environment Variables
+      # ===== 3. 设置 Clang（5.10 专用 r450784e） =====
+      - name: Setup Clang
         run: |
-          echo "ARCH=arm64" >> $GITHUB_ENV
-          echo "LLVM=1" >> $GITHUB_ENV
-          echo "LLVM_IAS=1" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_USER=github" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_HOST=actions" >> $GITHUB_ENV
+          mkdir -p $WORKSPACE/clang
+          cd $WORKSPACE/clang
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 -b android-13.0.0_r7 clang-r450784e
+          export PATH=$WORKSPACE/clang/clang-r450784e/bin:$PATH
+          echo "PATH=$WORKSPACE/clang/clang-r450784e/bin:$PATH" >> $GITHUB_ENV
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "LD=ld.lld" >> $GITHUB_ENV
+          echo "AR=llvm-ar" >> $GITHUB_ENV
+          echo "NM=llvm-nm" >> $GITHUB_ENV
+          echo "STRIP=llvm-strip" >> $GITHUB_ENV
+          echo "OBJCOPY=llvm-objcopy" >> $GITHUB_ENV
+          echo "OBJDUMP=llvm-objdump" >> $GITHUB_ENV
+          echo "READELF=llvm-readelf" >> $GITHUB_ENV
 
-      - name: Generate Defconfig
+      # ===== 4. 配置内核（使用 sky_GKI_defconfig） =====
+      - name: Configure kernel
         run: |
-          cd kernel_source
-          make mrproper
-          mkdir -p "$GITHUB_WORKSPACE/out"
-          # 优先使用自定义 config，若不存在则使用 defconfig
-          if [ -f arch/arm64/configs/config ]; then
-            cp arch/arm64/configs/config "$GITHUB_WORKSPACE/out/.config"
-            make O="$GITHUB_WORKSPACE/out" ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig
-          else
-            make O="$GITHUB_WORKSPACE/out" ARCH=arm64 LLVM=1 LLVM_IAS=1 defconfig
-          fi
+          cd $WORKSPACE/kernel
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          # 使用 GKI 配置
+          make O=out vendor/sky_GKI_defconfig
+          # 额外开启 mihw（官方自带，只是未启用）
+          echo "CONFIG_MIHW=y" >> out/.config
+          echo "CONFIG_PM_DEVFREQ=y" >> out/.config
+          echo "CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y" >> out/.config
+          # 处理新选项
+          make O=out olddefconfig
 
-      - name: Build Kernel
+      # ===== 5. 编译内核（强制 -j4 防止 OOM） =====
+      - name: Build kernel
         run: |
-          cd kernel_source
-          make O="$GITHUB_WORKSPACE/out" -j$(nproc) LLVM=1 LLVM_IAS=1 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
-          if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "❌ 编译失败"
-            tail -100 "$GITHUB_WORKSPACE/build.log"
+          cd $WORKSPACE/kernel
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make -j4 O=out 2>&1 | tee build.log
+          # 检查 Image.gz 是否存在
+          if [ ! -f out/arch/arm64/boot/Image.gz ]; then
+            echo "❌ 编译失败，Image.gz 未生成"
             exit 1
           fi
 
-      - name: Upload build log (if failed)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: build.log
-
-      - name: Package Kernel
+      # ===== 6. 打包 AnyKernel3（GKI 专用） =====
+      - name: Package AnyKernel3
         run: |
-          cd "$GITHUB_WORKSPACE/out"
-          mkdir -p kernel_package
-          find . -name "Image*" -exec cp {} kernel_package/ \;
-          cd kernel_package
-          zip -r "$GITHUB_WORKSPACE/kernel-full.zip" .
+          # 克隆 AnyKernel3 模板（支持 vendor_boot）
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 $WORKSPACE/AnyKernel3
+          cd $WORKSPACE/AnyKernel3
+          # 复制内核镜像
+          cp $WORKSPACE/kernel/out/arch/arm64/boot/Image.gz .
+          # 复制设备树（dtb）如果存在
+          if [ -f $WORKSPACE/kernel/out/arch/arm64/boot/dts/vendor/qcom/sky.dtb ]; then
+            cp $WORKSPACE/kernel/out/arch/arm64/boot/dts/vendor/qcom/sky.dtb dtb
+          fi
+          # 修改 anykernel.sh，设置设备代号和分区
+          sed -i 's/device.name1=/device.name1=sky/' anykernel.sh
+          sed -i 's/device.name2=/device.name2=sky/' anykernel.sh
+          # GKI 设备内核在 vendor_boot，需要设置 block 路径
+          echo "block=/dev/block/by-name/vendor_boot" >> anykernel.sh
+          # 打包 zip
+          zip -r9 AnyKernel3-sky.zip * -x *.zip
+          mkdir -p $WORKSPACE/out
+          mv AnyKernel3-sky.zip $WORKSPACE/out/
 
-      - name: Upload Artifact
+      # ===== 7. 上传产物 =====
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-full
-          path: kernel-full.zip
-          retention-days: 7
+          name: Sky-Kernel-AnyKernel3
+          path: ${{ env.WORKSPACE }}/out/AnyKernel3-sky.zip
+          if-no-files-found: error
