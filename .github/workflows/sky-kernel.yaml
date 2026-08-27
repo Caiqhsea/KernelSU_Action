@@ -10,15 +10,41 @@ jobs:
     env:
       WORKSPACE: ${{ github.workspace }}/kernel_workspace
     steps:
-      # 1. 检出你的 workflow 仓库（本身只是触发，不包含内核源码）
       - uses: actions/checkout@v4
 
-      # 2. 克隆内核源码（从你的 Fork 仓库）
       - name: Clone kernel source
         run: |
           git clone --depth=1 https://github.com/Caiqhsea/Xiaomi_Kernel_OpenSource -b sky-t-oss $WORKSPACE/kernel
 
-      # 3. 安装基础依赖
+      # ========== 核心修正：解压 mihw 补全缺失的源码 ==========
+      - name: Extract mihw driver from archive
+        run: |
+          cd $WORKSPACE/kernel
+          
+          # 检查压缩包是否存在
+          if [ ! -f $GITHUB_WORKSPACE/mihw.tar.gz ]; then
+            echo "❌ 错误：仓库根目录找不到 mihw.tar.gz，请上传该文件"
+            exit 1
+          fi
+          
+          echo ">>> 解压 mihw 驱动到 drivers/ ..."
+          tar -xzf $GITHUB_WORKSPACE/mihw.tar.gz -C drivers/
+          
+          # 验证解压是否成功（关键文件 Kconfig 必须存在）
+          if [ ! -f drivers/mihw/Kconfig ]; then
+            echo "❌ 解压失败，请检查 mihw.tar.gz 内部结构是否包含 mihw/ 文件夹"
+            exit 1
+          fi
+          
+          # 主 drivers/Kconfig 已经有 source 引用了（报错第229行证明），所以不用再加
+          # 只需要确保 Makefile 里有引用即可
+          if ! grep -q "obj-\$(CONFIG_MIHW) += mihw/" drivers/Makefile; then
+            echo 'obj-$(CONFIG_MIHW) += mihw/' >> drivers/Makefile
+          fi
+          
+          echo "✅ mihw 驱动解压并集成完成（包含 .c 和 .h 源码）"
+      # ========================================================
+
       - name: Install dependencies
         run: |
           sudo apt update -qq
@@ -27,12 +53,10 @@ jobs:
             git libelf-dev libssl-dev lz4 make python3 rsync unzip zip zstd \
             libncurses-dev
 
-      # 4. 安装交叉编译器（提供 aarch64-linux-gnu-ld）
       - name: Install cross-compiler
         run: |
           sudo apt install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-      # 5. 设置 Clang（5.10 专用 r450784e）
       - name: Setup Clang
         run: |
           mkdir -p $WORKSPACE/clang
@@ -50,54 +74,41 @@ jobs:
           echo "READELF=llvm-readelf" >> $GITHUB_ENV
           echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
 
-      # 6. 配置内核（使用 sky_GKI_defconfig，并开启 mihw）
       - name: Configure kernel
         run: |
           cd $WORKSPACE/kernel
           export ARCH=arm64
-          # CROSS_COMPILE 已经从环境变量中获取
           make O=out vendor/sky_GKI_defconfig
-          # 额外开启需要的选项
           echo "CONFIG_MIHW=y" >> out/.config
           echo "CONFIG_PM_DEVFREQ=y" >> out/.config
           echo "CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y" >> out/.config
-          # 处理新增配置
           make O=out olddefconfig
 
-      # 7. 编译内核（限制并行数防止内存溢出）
       - name: Build kernel
         run: |
           cd $WORKSPACE/kernel
           export ARCH=arm64
-          # 使用 -j4 避免 OOM
           make -j4 O=out 2>&1 | tee build.log
-          # 检查产物
           if [ ! -f out/arch/arm64/boot/Image.gz ]; then
             echo "❌ 编译失败，Image.gz 未生成"
             exit 1
           fi
 
-      # 8. 打包 AnyKernel3（GKI 设备适用）
       - name: Package AnyKernel3
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 $WORKSPACE/AnyKernel3
           cd $WORKSPACE/AnyKernel3
           cp $WORKSPACE/kernel/out/arch/arm64/boot/Image.gz .
-          # 如果存在 dtb，也复制（可选）
           if [ -f $WORKSPACE/kernel/out/arch/arm64/boot/dts/vendor/qcom/sky.dtb ]; then
             cp $WORKSPACE/kernel/out/arch/arm64/boot/dts/vendor/qcom/sky.dtb dtb
           fi
-          # 修改 anykernel.sh 以适配 sky
           sed -i 's/device.name1=/device.name1=sky/' anykernel.sh
           sed -i 's/device.name2=/device.name2=sky/' anykernel.sh
-          # 指定 vendor_boot 分区（GKI）
           echo "block=/dev/block/by-name/vendor_boot" >> anykernel.sh
-          # 打包 zip
           zip -r9 AnyKernel3-sky.zip * -x *.zip
           mkdir -p $WORKSPACE/out
           mv AnyKernel3-sky.zip $WORKSPACE/out/
 
-      # 9. 上传产物
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
